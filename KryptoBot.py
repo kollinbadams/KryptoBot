@@ -61,7 +61,7 @@ def get_crypto_data():
     #append sum to array
     cryptoData.append(sumHodl)
     #Insert to Google Sheet Call
-    #InsertToGoogleSheet(cryptoData)
+    InsertToGoogleSheet(cryptoData)
     #Send Email Call
     SendEmail(cryptoData)
 
@@ -238,11 +238,6 @@ def SendEmail(data):
         <br><br>
         <h2>Today's Popular Headlines:</h2>
         <br>
-        <div>
-        <% for h in headline_snippets: 
-             print h 
-         end %>
-        </div>
         </body>
         </html>
     """.format(**locals())
@@ -257,4 +252,4 @@ def SendEmail(data):
     server.quit()
 
 if __name__ == "__main__":
-    _Init_Krypto_Bot()
+    get_crypto_data()
