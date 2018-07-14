@@ -270,6 +270,4 @@ class KryptoBot:
         server.sendmail(from_addr, to_addr, text)
         server.quit()
         
-#if __name__ == "__main__":
-#    _Init_Krypto_Bot()
-bot = KryptoBot(r"C:\Users\Kollin\Documents\Development\PythonDev\Config.ini", r"C:\Users\Kollin\Documents\Development\PythonDev\coin_config.ini")
+bot = KryptoBot(r"FILEPATHTOCONFIG.INI", r"FILEPATHTOCOIN_CONFIG.INI")
