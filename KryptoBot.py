@@ -1,6 +1,6 @@
 import json
 import requests
-from pprint import pprint
+import pprint
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import smtplib
@@ -11,245 +11,265 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import requests
 from bs4 import BeautifulSoup
+import configparser
 
+# For Reference:
+# Coin IDs found from https://api.coinmarketcap.com/v2/listings/
+#         Bitcoin ID = 1
+#         Litecoin ID = 2
+#         Stellar Lumens ID = 512
+#         Ripple ID = 52
+#         Tron ID = 1958
+#
+class KryptoBot:
+    def __init__(self,config_filepath, coin_config_filepath):
+        self.config = configparser.ConfigParser()
+        self.config.read(config_filepath)
+        self.config_filepath = config_filepath
 
+        self.coin_config = configparser.ConfigParser()
+        self.coin_config.read(coin_config_filepath)
+        self.coin_config_filepath = coin_config_filepath
 
-def get_crypto_data():
-    #Summation variable Initialization, and Individual holding value variable initialization
-    sumHodl=holdingValue= 0.0
-    
-    #Hardcode Coin IDs found from https://api.coinmarketcap.com/v2/listings/
-    btcID = 1
-    ltcID = 2
-    xlmID = 512
-    xrpID = 52
-    trxID = 1958
-    
-    #Hardcode coin holding amounts
-    btcHodl =.01
-    ltcHodl =4.00
-    xlmHodl =400.00
-    xrphodl =1080.00
-    trxhodl =9626.00
-    
-    #Initialize Dictionary with the Ids for each Crypto, paired with each holding amount
-    #Could be handled dynamically in the future if need be
-    portfolio = {
-            btcID:btcHodl,
-            ltcID:ltcHodl,
-            xlmID:xlmHodl,
-            xrpID:xrphodl,
-            trxID:trxhodl
-        }
+        self.sumHodl = self.variance = 0.0
+        self.date = datetime.datetime.now().strftime("%m/%d/%y")
+        self.portfolio_arr = [self.date]
+        self.api_url = 'https://api.coinmarketcap.com/v2/ticker/'
 
-    #initialize data array with current date
-    cryptoData = [datetime.datetime.now().strftime("%m/%d/%y")]
+    def get_krypto_data(self):
+        sections = self.coin_config.sections()
+        filepath = self.coin_config_filepath
+        for section in sections:
+            r = requests.get(self.api_url + self.coin_config.get(section,'id'), verify=False).json()
 
-    for coin, amount in portfolio.items():
-        #Fetch JSON data from coinmarket cap api, passing in what coin data to fetch
-        r = requests.get('https://api.coinmarketcap.com/v2/ticker/'+str(coin), verify=False).json()
-        #initialize price, holdingValue, percentchange variables for readability
-        price = '{0:,.3f}'.format(r['data']['quotes']['USD']['price'])
-        holdingValue = '{0:,.3f}'.format(r['data']['quotes']['USD']['price'] *amount)
-        percentChange24hour = r['data']['quotes']['USD']['percent_change_24h']
-        #Append items to array
-        cryptoData.append(price)
-        cryptoData.append(holdingValue)
-        cryptoData.append(percentChange24hour)
-        #Calculates sum of individual holdings
-        sumHodl += float(holdingValue)
-    #append sum to array
-    cryptoData.append(sumHodl)
-    #Insert to Google Sheet Call
-    InsertToGoogleSheet(cryptoData)
-    #Send Email Call
-    SendEmail(cryptoData)
+            self.coin_config[section]['price'] = '{0:.3f}'.format(r['data']['quotes']['USD']['price'])
+            self.coin_config[section]['percent_change_24h'] = '{0:.3f}'.format(r['data']['quotes']['USD']['percent_change_24h'])
+            self.coin_config[section]['holding_sum'] = '{0:.3f}'.format(float(self.coin_config.get(section,'price')) * float(self.coin_config.get(section,'amount')))
+            self.portfolio_arr.append(self.coin_config.get(section,'price'))
+            self.portfolio_arr.append(self.coin_config.get(section,'holding_sum'))
+            self.portfolio_arr.append(self.coin_config.get(section,'percent_change_24h'))
 
-def test_get_crypto_data():
-    #Summation variable Initialization, and Individual holding value variable initialization
-    sumHodl=hodlVal= 0
-    
-    #Hardcode Coin IDs found from https://api.coinmarketcap.com/v2/listings/
-    btcID = 1
-    ltcID = 2
-    xlmID = 512
-    xrpID = 52
-    trxID = 1958
-    
-    #Hardcode coin holding amounts
-    btcHodl =.01
-    ltcHodl =4.00
-    xlmHodl =400.00
-    xrphodl =1080.00
-    trxhodl =9626.00
-    
-    #Initialize Dictionary with the Ids for each Crypto, paired with each holding amount
-    #Could be handled dynamically in the future if need be
-    portfolio = {
-            btcID:btcHodl,
-            ltcID:ltcHodl,
-            xlmID:xlmHodl,
-            xrpID:xrphodl,
-            trxID:trxhodl
-        }
+            self.sumHodl += eval(self.coin_config.get(section, 'holding_sum'))
+            with open(filepath, 'w') as changes:
+                self.coin_config.write(changes)
 
-    cryptoData = [datetime.datetime.now().strftime("%m/%d/%y")]
-    
-    
-    #for id in range(len(coins)):
-    for coin, amount in portfolio.items():
-        #Fetch JSON data from coinmarket cap api, passing in what coin data to fetch
-        r = requests.get('https://api.coinmarketcap.com/v2/ticker/'+str(coin), verify=False).json()
-        price = r['data']['quotes']['USD']['price']
-        holdingValue = r['data']['quotes']['USD']['price'] *amount
-        percentChange24hour = r['data']['quotes']['USD']['percent_change_24h']
-        cryptoData.append(price)
-        cryptoData.append(holdingValue)
-        cryptoData.append(percentChange24hour)
-        #Prints current price of specified coin
-        print("Current Price(USD) of " + r['data']['name'] + ": " + '{0:,.2f}'.format(r['data']['quotes']['USD']['price']))
-        #Calculates individual holding value from corresponding coin/token
-        hodlVal = r['data']['quotes']['USD']['price'] * amount
-        #Prints current value of individual holding
-        print("Current Value of " + r['data']['symbol']+ " Holdings: " + '{0:,.2f}'.format(hodlVal))
-        #Calculates sum of individual holdings
-        sumHodl += hodlVal
-    #Prints total value of portfolio
-    cryptoData.append('{0:,.3f}'.format(sumHodl))
-    print("Gross Value of Holdings: $ "+ '{0:,.2f}'.format(sumHodl))
-    print(cryptoData)
+        self.sumHodl = '{0:.3f}'.format(self.sumHodl)
+        self.portfolio_arr.append(self.sumHodl)
+        self.variance = '{0:.3f}'.format(float(self.sumHodl) - float(self.config.get('Summary', 'Total_Invested')))
+        self.portfolio_arr.append(self.variance)
 
-def InsertToGoogleSheet(data):
-    scope =['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_name('kryptobot_info.json',scope)
-    client = gspread.authorize(creds)
-    
-    sheet = client.open('Crypto Portfolio History').sheet1
-    
-    row = data
-    sheet.append_row(row)
-    print("Operation - InsertToGoogleSheet(data) complete...")
+    def test_get_krypto_data(self):
+        print("Getting coin config sections...")
+        sections = self.coin_config.sections()
+        print("Setting config filepath...")
+        filepath = self.coin_config_filepath
+        print("Begin get_krypto_data...")
+        for section in sections:
+            r = requests.get(self.api_url + self.coin_config.get(section,'id'), verify=False).json()
+            print("Request: ", r)
+            print("Setting config values...")
+            self.coin_config[section]['price'] = '{0:.3f}'.format(r['data']['quotes']['USD']['price'])
+            self.coin_config[section]['percent_change_24h'] = '{0:.3f}'.format(r['data']['quotes']['USD']['percent_change_24h'])
+            self.coin_config[section]['holding_sum'] = '{0:.3f}'.format(float(self.coin_config.get(section,'price')) * float(self.coin_config.get(section,'amount')))
+            print("Appending to array...")
+            self.portfolio_arr.append(self.coin_config.get(section,'price'))
+            self.portfolio_arr.append(self.coin_config.get(section,'holding_sum'))
+            self.portfolio_arr.append(self.coin_config.get(section,'percent_change_24h'))
+            print(self.portfolio_arr)
+            print("Calculating sum:")
+            self.sumHodl += float(self.coin_config.get(section, 'holding_sum'))
+            print(self.sumHodl)
+            print("Saving config changes...")
+            with open(filepath, 'w') as changes:
+                self.coin_config.write(changes)
+            print("Save complete...")
 
-def SendEmail(data):
-    fromaddr = "FROMADDR"#Place from email address when ready to run
-    toaddr = "TOADDR"#place to email address when ready to run
-    currentDate = datetime.datetime.now().strftime("%m/%d/%y")
-    msg = MIMEMultipart()
-    msg['From'] = fromaddr
-    msg['To'] = toaddr
-    msg['Subject'] = "Crypto Portfolio Report - " + currentDate
-    
-    xlmPrice        = data[1]
-    xlmHoldValue    = data[2]
-    xlm24hour       = data[3]
-    btcPrice        = data[4]
-    btcHoldValue    = data[5]
-    btc24hour       = data[6]
-    ltcPrice        = data[7]
-    ltcHoldValue    = data[8]
-    ltc24hour       = data[9]
-    xrpPrice        = data[10]
-    xrpHoldValue    = data[11]
-    xrp24hour       = data[12]
-    trxPrice        = data[13]
-    trxHoldValue    = data[14]
-    trx24hour       = data[15]
-    holdingNetWorth = data[16]
-    Invested        = 3965.130
-    Variance        = data[16] - Invested
+        self.sumHodl = '{0:.3f}'.format(self.sumHodl)
+        print("End get_krypto_data...")
+        self.portfolio_arr.append(self.sumHodl)
+        print("Final sum: ", self.sumHodl)
+        self.variance = '{0:.3f}'.format(float(self.sumHodl) - float(self.config.get('Summary', 'Total_Invested')))
+        print("Variance: ", self.variance)
+        self.portfolio_arr.append(self.variance)
+        print("Final array: ", self.portfolio_arr)
 
-
-    body = """\
-    <html>
-        <head>
-        <style>
-            table {{
-                font-family: arial, sans-serif;
-                border-collapse: collapse;
-                width: 100%;
-            }}
-    
-            td, th {{
-                border: 1px solid #dddddd;
-                text-align: left;
-                padding: 8px;
-            }}
-    
-            tr:nth-child(even) {{
-                background-color: #dddddd;
-            }}
-        </style>
-        </head>
-        <body>
         
-        <h2>Daily Report:</h2>
+    def InsertToGoogleSheet(self):
+        scope = ['https://spreadsheets.google.com/feeds','https://www.googleapis.com/auth/drive']
+        creds = ServiceAccountCredentials.from_json_keyfile_name('kryptobot_info.json',scope)
+        client = gspread.authorize(creds)
         
-        <table>
-          <tr>
-            <th>Coin/Token</th>
-            <th>Current Price</th>
-            <th>Current Holding Value</th>
-            <th>24H Variance</th>
-          </tr>
-          <tr>
-            <td>Bitcoin(BTC)</td>
-            <td>{btcPrice}</td>
-            <td>{btcHoldValue}</td>
-            <td>{btc24hour}</td>
-          </tr>
-          <tr>
-            <td>LiteCoin(LTC)</td>
-            <td>{ltcPrice}</td>
-            <td>{ltcHoldValue}</td>
-            <td>{ltc24hour}</td>
-          </tr>
-          <tr>
-            <td>Stellar Lumens(XLM)</td>
-            <td>{xlmPrice}</td>
-            <td>{xlmHoldValue}</td>
-            <td>{xlm24hour}</td>
-          </tr>
-          <tr>
-            <td>Ripple(XRP)</td>
-            <td>{xrpPrice}</td>
-            <td>{xrpHoldValue}</td>
-            <td>{xrp24hour}</td>
-          </tr>
-          <tr>
-            <td>Tron(TRX)</td>
-            <td>{trxPrice}</td>
-            <td>{trxHoldValue}</td>
-            <td>{trx24hour}</td>
-          </tr>
-        </table>
-        <br><br>
-        <table>
-            <tr>
-                <th>Net Worth</th>
-                <th>Invested</th>
-                <th>Variance</th>
-            </tr>
-            <tr>
-                <td>{holdingNetWorth}</td>
-                <td>{Invested}</td>
-                <td>{Variance}</td>
-            </tr>
-        </table>
-        <br><br>
-        <h2>Today's Popular Headlines:</h2>
-        <br>
-        </body>
-        </html>
-    """.format(**locals())
+        sheet = client.open('Crypto Portfolio History').sheet1
+        
+        row = self.portfolio_arr
+        sheet.append_row(row)
     
-    msg.attach(MIMEText(body, 'html'))
-     
-    server = smtplib.SMTP('smtp.gmail.com', 587)
-    server.starttls()
-    server.login(fromaddr, "PASSWORD")#Place from email password when ready to run
-    text = msg.as_string()
-    server.sendmail(fromaddr, toaddr, text)
-    server.quit()
+    def test_dynamic_email(self):
+        from_addr = self.config.get('Email', 'FromAddress')
+        to_addr = self.config.get('Email', 'ToAddress')
+        password = self.config.get('Email','Password')
+        msg = MIMEMultipart()
+        msg['From'] = from_addr
+        msg['To'] = to_addr
+        msg['Subject'] = "TEST - Crypto Portfolio Report - " + self.date
 
-if __name__ == "__main__":
-    get_crypto_data()
+        self.coin_config.read(self.coin_config_filepath)
+        sections = self.coin_config.sections()
+    
+        body = """\
+        <html>
+            <head>
+            <style>
+                table {
+                    font-family: arial, sans-serif;
+                    border-collapse: collapse;
+                    width: 100%;
+                }
+        
+                td, th {
+                    border: 1px solid #dddddd;
+                    text-align: left;
+                    padding: 8px;
+                }
+        
+                tr:nth-child(even) {
+                    background-color: #dddddd;
+                }
+            </style>
+            </head>
+            <body>
+            
+            <h2>Test Daily Report:</h2>
+            
+            <table>
+              <tr>
+                <th>Coin/Token</th>
+                <th>Current Price</th>
+                <th>Current Holding Value</th>
+                <th>24H Variance</th>
+              </tr>
+			  """
+        for section in sections:
+            body = body + "<tr>"
+            body = body + "<td>" + section + "</td>"
+            body = body + "<td>" + self.coin_config.get(section, 'price') + "</td>"
+            body = body + "<td>" + self.coin_config.get(section, 'holding_sum') + "</td>"
+            body = body + "<td>" + self.coin_config.get(section, 'percent_change_24h') + "</td>"
+            body = body + "</tr>"
+        body = body + """\
+            </table>
+            <br><br>
+            <table>
+                <tr>
+                    <th>Net Worth</th>
+                    <th>Invested</th>
+                    <th>Variance</th>
+                </tr>
+                <tr>
+                    <td>{sumhodl}</td>
+                    <td>{investment}</td>
+                    <td>{variance}</td>
+                </tr>
+            </table>
+            <br><br>
+            </body>
+            </html>
+        """.format(sumhodl = self.sumHodl,
+                  investment= self.config.get('Summary', 'Total_Invested'),
+                  variance = self.variance)
+        
+        msg.attach(MIMEText(body, 'html'))
+         
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(from_addr, password)
+        text = msg.as_string()
+        server.sendmail(from_addr, to_addr, text)
+        server.quit()
+
+    def send_email(self):
+        from_addr = self.config.get('Email', 'FromAddress')
+        to_addr = self.config.get('Email', 'ToAddress')
+        password = self.config.get('Email','Password')
+        msg = MIMEMultipart()
+        msg['From'] = from_addr
+        msg['To'] = to_addr
+        msg['Subject'] = "Crypto Portfolio Report - " + self.date
+
+        self.coin_config.read(self.coin_config_filepath)
+        sections = self.coin_config.sections()
+    
+        body = """\
+        <html>
+            <head>
+            <style>
+                table {
+                    font-family: arial, sans-serif;
+                    border-collapse: collapse;
+                    width: 100%;
+                }
+        
+                td, th {
+                    border: 1px solid #dddddd;
+                    text-align: left;
+                    padding: 8px;
+                }
+        
+                tr:nth-child(even) {
+                    background-color: #dddddd;
+                }
+            </style>
+            </head>
+            <body>
+            
+            <h2>Daily Report:</h2>
+            
+            <table>
+              <tr>
+                <th>Coin/Token</th>
+                <th>Current Price</th>
+                <th>Current Holding Value</th>
+                <th>24H Variance</th>
+              </tr>
+			  """
+        for section in sections:
+            body = body + "<tr>"
+            body = body + "<td>" + section + "</td>"
+            body = body + "<td>" + self.coin_config.get(section, 'price') + "</td>"
+            body = body + "<td>" + self.coin_config.get(section, 'holding_sum') + "</td>"
+            body = body + "<td>" + self.coin_config.get(section, 'percent_change_24h') + "</td>"
+            body = body + "</tr>"
+        body = body + """\
+            </table>
+            <br><br>
+            <table>
+                <tr>
+                    <th>Net Worth</th>
+                    <th>Invested</th>
+                    <th>Variance</th>
+                </tr>
+                <tr>
+                    <td>{sumhodl}</td>
+                    <td>{investment}</td>
+                    <td>{variance}</td>
+                </tr>
+            </table>
+            <br><br>
+            </body>
+            </html>
+        """.format(sumhodl = self.sumHodl,
+                  investment= self.config.get('Summary', 'Total_Invested'),
+                  variance = self.variance)
+        
+        msg.attach(MIMEText(body, 'html'))
+         
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(from_addr, password)
+        text = msg.as_string()
+        server.sendmail(from_addr, to_addr, text)
+        server.quit()
+        
+#if __name__ == "__main__":
+#    _Init_Krypto_Bot()
+bot = KryptoBot(r"C:\Users\Kollin\Documents\Development\PythonDev\Config.ini", r"C:\Users\Kollin\Documents\Development\PythonDev\coin_config.ini")
